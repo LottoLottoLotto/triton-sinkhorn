@@ -56,7 +56,7 @@ x = torch.randn(32, 4, 4, device='cuda', dtype=torch.float16, requires_grad=True
 out = layer(x)
 
 print(out[0]) 
-# tensor([[0.25, 0.25, 0.25, 0.25], ...])
+# tensor([[0.25, 0.25, 0.25, 0.25], ...])```
 
 
 ### 2. Integration: Lane Mixing
