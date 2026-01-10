@@ -57,3 +57,119 @@ out = layer(x)
 
 print(out[0]) 
 # tensor([[0.25, 0.25, 0.25, 0.25], ...])
+
+
+2. Integration: Lane Mixing
+Example wrapper for learning mixing weights in a Transformer-like architecture:
+
+Python
+
+import torch.nn as nn
+
+class FusedSinkhornLaneMixer(nn.Module):
+    def __init__(self, num_lanes, iters=20):
+        super().__init__()
+        self.lanes = num_lanes
+        
+        # Learnable mixing weights (initialized in Float32 for stability)
+        self.mixing_logits = nn.Parameter(torch.randn(num_lanes, num_lanes) * 0.02)
+        
+        # The Fused Kernel
+        self.sinkhorn = FusedMHC(mhc_iters=iters)
+
+    def forward(self, x_lanes):
+        # x_lanes shape: (Batch, Seq, Lanes, Dim)
+        original_dtype = x_lanes.dtype 
+        
+        # 1. Normalize weights (Compute P)
+        # Unsqueeze to add batch dim: (1, Lanes, Lanes)
+        logits_batched = self.mixing_logits.unsqueeze(0).float()
+        P = self.sinkhorn(logits_batched).squeeze(0)
+        
+        # 2. Mix the lanes (Apply P)
+        # "bsid,oi->bsod" -> Apply mixing matrix P to the lane dimension
+        out = torch.einsum('bsid,oi->bsod', x_lanes, P.to(x_lanes.device))
+        
+        # 3. Cast back to original precision (e.g., float16)
+        return out.to(original_dtype)
+📊 Benchmark Script
+To reproduce the performance results, save this code as benchmark.py.
+
+Note: The reference implementation below correctly normalizes across rows (dim 2) and columns (dim 1) for batched inputs.
+
+Python
+
+import torch
+import torch.nn as nn
+import pandas as pd
+from mhc.layer import FusedMHC
+
+class SlowSinkhorn(nn.Module):
+    def __init__(self, iters=20, eps=1e-6):
+        super().__init__()
+        self.iters = iters
+        self.eps = eps
+
+    def forward(self, x):
+        # Naive implementation (exp -> normalize)
+        P = torch.exp(x.float())
+        for _ in range(self.iters):
+            # Row normalize: sum over columns
+            P = P / (P.sum(dim=2, keepdim=True) + self.eps)
+            # Col normalize: sum over rows
+            P = P / (P.sum(dim=1, keepdim=True) + self.eps)
+        return P
+
+def benchmark_layer(name, layer, x, iters=100):
+    # Warmup
+    for _ in range(10):
+        loss = layer(x).sum(); loss.backward(); x.grad = None
+    torch.cuda.synchronize()
+    
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+    torch.cuda.reset_peak_memory_stats()
+    mem_start = torch.cuda.memory_allocated()
+
+    start_event.record()
+    for _ in range(iters):
+        out = layer(x)
+        loss = out.sum()
+        loss.backward()
+        x.grad = None
+    end_event.record()
+    torch.cuda.synchronize()
+    
+    return start_event.elapsed_time(end_event) / iters, (torch.cuda.max_memory_allocated() - mem_start) / 1024**2
+
+if __name__ == "__main__":
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"🚀 Benchmarking on {device}...")
+    
+    configs = [{"B": 32, "L": 4}, {"B": 128, "L": 4}, {"B": 32, "L": 8}, {"B": 128, "L": 8}]
+    results = []
+
+    for cfg in configs:
+        B, L, I = cfg["B"], cfg["L"], 20
+        x = torch.randn(B, L, L, device=device, requires_grad=True)
+        
+        t_slow, mem_slow = benchmark_layer("Slow", SlowSinkhorn(I).to(device), x)
+        t_fast, mem_fast = benchmark_layer("Fast", FusedMHC(I).to(device), x)
+        
+        results.append({
+            "Batch": B, "Lanes": L,
+            "Slow (ms)": f"{t_slow:.3f}", "Fast (ms)": f"{t_fast:.3f}",
+            "Speedup": f"{t_slow/t_fast:.1f}x" if t_fast > 0 else "N/A",
+            "Mem Saved": f"{100*(1-(mem_fast/mem_slow)):.1f}%" if mem_slow > 0 else "N/A"
+        })
+
+    print(pd.DataFrame(results).to_string(index=False))
+📂 File Structure
+kernels.py: Contains the raw Triton kernels (_mhc_sinkhorn_fwd_kernel and _mhc_sinkhorn_bwd_kernel).
+
+layer.py: The PyTorch autograd.Function wrapper and nn.Module interface. Handles contiguous memory enforcement and type casting.
+
+benchmark.py: Script to reproduce the performance results.
+
+License
+MIT License. Free to use in personal and commercial projects.
