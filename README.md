@@ -60,7 +60,7 @@ print(out[0])
 
 ---
 
-### 2. Integration: Lane Mixing
+## 2. Integration: Lane Mixing
 Example wrapper for learning mixing weights in a Transformer-like architecture:
 
 ```Python
@@ -95,7 +95,7 @@ class FusedSinkhornLaneMixer(nn.Module):
         return out.to(original_dtype)```
 ---
 
-### 📊 Benchmark Script
+## 📊 Benchmark Script
 To reproduce the performance results, save this code as benchmark.py.
 
 Note: The reference implementation below correctly normalizes across rows (dim 2) and columns (dim 1) for batched inputs.
@@ -169,7 +169,7 @@ if __name__ == "__main__":
     print(pd.DataFrame(results).to_string(index=False))
 ---
 
-### 📂 File Structure
+## 📂 File Structure
 kernels.py: Contains the raw Triton kernels (_mhc_sinkhorn_fwd_kernel and _mhc_sinkhorn_bwd_kernel).
 
 layer.py: The PyTorch autograd.Function wrapper and nn.Module interface. Handles contiguous memory enforcement and type casting.
