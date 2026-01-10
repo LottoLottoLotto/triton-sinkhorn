@@ -62,7 +62,7 @@ print(out[0])
 ### 2. Integration: Lane Mixing
 Example wrapper for learning mixing weights in a Transformer-like architecture:
 
-Python
+```Python
 
 import torch.nn as nn
 
@@ -91,13 +91,14 @@ class FusedSinkhornLaneMixer(nn.Module):
         out = torch.einsum('bsid,oi->bsod', x_lanes, P.to(x_lanes.device))
         
         # 3. Cast back to original precision (e.g., float16)
-        return out.to(original_dtype)
+        return out.to(original_dtype)```
+
 ### 📊 Benchmark Script
 To reproduce the performance results, save this code as benchmark.py.
 
 Note: The reference implementation below correctly normalizes across rows (dim 2) and columns (dim 1) for batched inputs.
 
-Python
+```Python
 
 import torch
 import torch.nn as nn
@@ -163,7 +164,8 @@ if __name__ == "__main__":
             "Mem Saved": f"{100*(1-(mem_fast/mem_slow)):.1f}%" if mem_slow > 0 else "N/A"
         })
 
-    print(pd.DataFrame(results).to_string(index=False))
+    print(pd.DataFrame(results).to_string(index=False))```
+
 ### 📂 File Structure
 kernels.py: Contains the raw Triton kernels (_mhc_sinkhorn_fwd_kernel and _mhc_sinkhorn_bwd_kernel).
 
