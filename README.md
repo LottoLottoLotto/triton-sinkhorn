@@ -56,8 +56,9 @@ x = torch.randn(32, 4, 4, device='cuda', dtype=torch.float16, requires_grad=True
 out = layer(x)
 
 print(out[0]) 
-# tensor([[0.25, 0.25, 0.25, 0.25], ...])```
+# tensor([[0.25, 0.25, 0.25, 0.25], ...])
 
+---
 
 ### 2. Integration: Lane Mixing
 Example wrapper for learning mixing weights in a Transformer-like architecture:
@@ -92,6 +93,7 @@ class FusedSinkhornLaneMixer(nn.Module):
         
         # 3. Cast back to original precision (e.g., float16)
         return out.to(original_dtype)```
+---
 
 ### 📊 Benchmark Script
 To reproduce the performance results, save this code as benchmark.py.
@@ -164,7 +166,8 @@ if __name__ == "__main__":
             "Mem Saved": f"{100*(1-(mem_fast/mem_slow)):.1f}%" if mem_slow > 0 else "N/A"
         })
 
-    print(pd.DataFrame(results).to_string(index=False))```
+    print(pd.DataFrame(results).to_string(index=False))
+---
 
 ### 📂 File Structure
 kernels.py: Contains the raw Triton kernels (_mhc_sinkhorn_fwd_kernel and _mhc_sinkhorn_bwd_kernel).
