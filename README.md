@@ -55,10 +55,11 @@ x = torch.randn(32, 4, 4, device='cuda', dtype=torch.float16, requires_grad=True
 # Returns a doubly-stochastic matrix (Rows and Cols sum to 1.0)
 out = layer(x)
 
-print(out[0]) 
+print(out[0])
 # tensor([[0.25, 0.25, 0.25, 0.25], ...])
-
+```
 ---
+
 
 ## 2. Integration: Lane Mixing
 Example wrapper for learning mixing weights in a Transformer-like architecture:
@@ -92,7 +93,8 @@ class FusedSinkhornLaneMixer(nn.Module):
         out = torch.einsum('bsid,oi->bsod', x_lanes, P.to(x_lanes.device))
         
         # 3. Cast back to original precision (e.g., float16)
-        return out.to(original_dtype)```
+        return out.to(original_dtype)
+```
 ---
 
 ## 📊 Benchmark Script
@@ -167,6 +169,7 @@ if __name__ == "__main__":
         })
 
     print(pd.DataFrame(results).to_string(index=False))
+```
 ---
 
 ## 📂 File Structure
@@ -176,5 +179,5 @@ layer.py: The PyTorch autograd.Function wrapper and nn.Module interface. Handles
 
 benchmark.py: Script to reproduce the performance results.
 
-##License
+## License
 MIT License. Free to use in personal and commercial projects.
