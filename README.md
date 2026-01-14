@@ -54,13 +54,14 @@ out = layer(x)
 loss = out.sum()
 loss.backward()
 ```
-mplementation Note: Autocast is disabled internally. The module runs the fused op in float32 for precision, then casts the output back to the original dtype of the input.
+### Implementation Note: 
+Autocast is disabled internally. The module runs the fused op in float32 for precision, then casts the output back to the original dtype of the input.
 
-Integration Example: Lane Mixing
+### Integration Example: Lane Mixing
 This pattern is useful for "Lane Mixing" in Mixture-of-Experts or multi-lane architectures where you need a soft permutation matrix to mix information between lanes.
-```
-Python
 
+Python
+```
 import torch
 import torch.nn as nn
 from mhc.layer import FusedMHC
