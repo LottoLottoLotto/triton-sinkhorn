@@ -37,7 +37,7 @@ The following benchmarks compare `FusedMHC` against a standard native PyTorch im
 
 `FusedMHC` expects the last two dimensions to be square (`n_lanes` x `n_lanes`). It internally flattens any leading dimensions into a batch of matrices.
 
-```python
+```
 import torch
 from mhc.layer import FusedMHC
 
