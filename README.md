@@ -1,110 +1,43 @@
-# triton-sinkhorn
-
-**triton-sinkhorn** is a high-performance, CUDA-fused implementation of the Sinkhorn-Knopp algorithm. It serves as a drop-in replacement for standard PyTorch layers to generate doubly-stochastic matrices (soft permutations) in deep learning models.
-
-Written in **OpenAI Triton**, this layer fuses the iterative normalization steps into a single CUDA kernel launch. This approach significantly reduces CPU overhead, eliminates memory fragmentation, and reduces the memory complexity of the backward pass from $\mathcal{O}(L \times \text{Iters})$ to $\mathcal{O}(1)$.
-
----
-
-## 🚀 Performance Benchmarks
-
-Benchmarks run on a consumer NVIDIA GPU (WSL2) comparing a naive PyTorch implementation (20 iterations) vs. FusedMHC.
-
-| Batch Size | Lanes | PyTorch (ms) | FusedMHC (ms) | Speedup | Memory Saved |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **32** | 4 | 1.676 | **0.263** | ⚡ **6.4x** | 📉 **94.1%** |
-| **128** | 4 | 1.784 | **0.266** | ⚡ **6.7x** | 📉 **94.0%** |
-| **32** | 8 | 1.744 | **0.264** | ⚡ **6.6x** | 📉 **93.7%** |
-| **128** | 8 | 1.958 | **0.275** | ⚡ **7.1x** | 📉 **93.7%** |
-
-### Key Benefits
-* **⚡ 7x Faster Layer Latency:** Reduces layer execution time from ~1.8ms to ~0.27ms, eliminating CPU-bound kernel launch overhead.
-* **💾 94% Memory Reduction:** Uses a Riemannian gradient derivation for the backward pass, avoiding the need to save intermediate tensors for every iteration of the loop.
-* **🛡️ Numerical Stability:** Operates internally in **Log-Space** (LogSumExp) using Float32 accumulation. This prevents underflow/overflow issues common in standard `exp()` implementations while supporting Float16/BFloat16 inputs.
-
----
-
-## 📦 Requirements
-
-* **Python:** 3.8+
-* **PyTorch:** 2.0+ (with CUDA support)
-* **Triton:** (Included with PyTorch 2.0+ on Linux/WSL)
-* **OS:** Linux or WSL2 (Windows Subsystem for Linux) is required for Triton compilation.
-
----
-
-## 🛠️ Usage
-
-### 1. Basic Implementation
-
-Use `FusedMHC` as a standard PyTorch module. It expects a square input matrix of shape `(Batch, Lanes, Lanes)`.
-
-```python
-import torch
+triton-sinkhorntriton-sinkhorn is a CUDA-fused implementation of the Sinkhorn-Knopp normalization loop designed to produce doubly-stochastic matrices (soft permutations) for deep learning workloads.It exposes a PyTorch nn.Module (FusedMHC) backed by OpenAI Triton forward/backward kernels that run the iterative row/column log-normalization in one compiled kernel per pass.The implementation performs the algorithm in log-space (LogSumExp-style) with float32 accumulation for stability, while accepting lower-precision inputs (FP16/BF16) and casting the result back to the input dtype.🚀 Performance BenchmarksThe following benchmarks compare FusedMHC against a standard native PyTorch implementation. The fused kernel significantly reduces memory overhead by avoiding the materialization of intermediate tensors for every iteration of the Sinkhorn loop.Batch SizeLanesPyTorch (ms)FusedMHC (ms)SpeedupMemory Saved3241.6760.2636.4x94.1%12841.7840.2666.7x94.0%3281.7440.2646.6x93.7%12881.9580.2757.1x93.7%✨ Key BenefitsFused Forward: Row log-softmax and column log-softmax operations are unrolled for ITERS iterations completely inside a single Triton kernel.Exact Backward: Backpropagation is implemented in Triton by replaying the loop in reverse using saved per-iteration log-space states.Numerical Stability: The forward pass clamps logits with max(w, -1e5) and operates entirely in log-space before exponentiating at the very end to return the transport matrix $P$.Memory Efficiency: Massive reduction in VRAM usage during training, as intermediate states for the normalization steps are not stored in global memory.📦 RequirementsPython 3.8+PyTorch 2.0+ with CUDA supportTriton (Standard in most modern PyTorch nightly/CUDA builds)Linux or WSL2 (Recommended for Triton compilation)🛠️ UsageBasic UsageFusedMHC expects the last two dimensions to be square (n_lanes x n_lanes). It internally flattens any leading dimensions into a batch of matrices.Pythonimport torch
 from mhc.layer import FusedMHC
 
-# 1. Initialize Layer (Define number of Sinkhorn iterations)
-# 20 iterations is recommended for convergence to doubly-stochastic
-layer = FusedMHC(mhc_iters=20).to('cuda')
+# Initialize layer (runs 20 iterations of Sinkhorn by default)
+layer = FusedMHC(mhc_iters=20).to("cuda")
 
-# 2. Create Input (Logits)
-# Shape: (Batch Size, Lanes, Lanes)
-x = torch.randn(32, 4, 4, device='cuda', dtype=torch.float16, requires_grad=True)
+# Input: [Batch, Lanes, Lanes]
+x = torch.randn(32, 4, 4, device="cuda", dtype=torch.float16, requires_grad=True)
 
-# 3. Forward Pass
-# Returns a doubly-stochastic matrix (Rows and Cols sum to 1.0)
+# Forward pass
 out = layer(x)
 
-print(out[0])
-# tensor([[0.25, 0.25, 0.25, 0.25], ...])
-```
----
-
-
-## 2. Integration: Lane Mixing
-Example wrapper for learning mixing weights in a Transformer-like architecture:
-
-```Python
-
+# Backward pass
+loss = out.sum()
+loss.backward()
+Implementation Note: Autocast is disabled internally. The module runs the fused op in float32 for precision, then casts the output back to the original dtype of the input.Integration Example: Lane MixingThis pattern is useful for "Lane Mixing" in Mixture-of-Experts or multi-lane architectures where you need a soft permutation matrix to mix information between lanes.Pythonimport torch
 import torch.nn as nn
+from mhc.layer import FusedMHC
 
 class FusedSinkhornLaneMixer(nn.Module):
     def __init__(self, num_lanes, iters=20):
         super().__init__()
         self.lanes = num_lanes
-        
-        # Learnable mixing weights (initialized in Float32 for stability)
+        # Initialize small random logits
         self.mixing_logits = nn.Parameter(torch.randn(num_lanes, num_lanes) * 0.02)
-        
-        # The Fused Kernel
         self.sinkhorn = FusedMHC(mhc_iters=iters)
 
     def forward(self, x_lanes):
-        # x_lanes shape: (Batch, Seq, Lanes, Dim)
-        original_dtype = x_lanes.dtype 
+        original_dtype = x_lanes.dtype
         
-        # 1. Normalize weights (Compute P)
-        # Unsqueeze to add batch dim: (1, Lanes, Lanes)
+        # 1. Compute Soft Permutation Matrix P
         logits_batched = self.mixing_logits.unsqueeze(0).float()
         P = self.sinkhorn(logits_batched).squeeze(0)
         
-        # 2. Mix the lanes (Apply P)
-        # "bsid,oi->bsod" -> Apply mixing matrix P to the lane dimension
-        out = torch.einsum('bsid,oi->bsod', x_lanes, P.to(x_lanes.device))
+        # 2. Apply mixing (einsum is usually faster in higher precision)
+        # x_lanes shape: [Batch, Seq, Lanes, Dim]
+        out = torch.einsum("bsid,oi->bsod", x_lanes, P.to(x_lanes.device))
         
-        # 3. Cast back to original precision (e.g., float16)
         return out.to(original_dtype)
-```
----
-
-## 📊 Benchmark Script
-To reproduce the performance results, save this code as benchmark.py.
-
-Note: The reference implementation below correctly normalizes across rows (dim 2) and columns (dim 1) for batched inputs.
-
-```Python
-
-import torch
+📂 File Structuremhc/kernels.py: Contains the raw Triton kernels _mhc_sinkhorn_fwd_kernel and _mhc_sinkhorn_bwd_kernel.mhc/layer.py: The PyTorch autograd.Function wrapper (MHCSinkhornFunction) and the high-level module (FusedMHC) that handles contiguity and dtype management.benchmark.py: A script to verify speedups and memory savings against a naive PyTorch implementation.📊 BenchmarkingYou can reproduce the performance numbers by running the provided benchmark script.Save the code below as benchmark.py.Run python benchmark.py.Pythonimport torch
 import torch.nn as nn
 import pandas as pd
 from mhc.layer import FusedMHC
@@ -116,68 +49,60 @@ class SlowSinkhorn(nn.Module):
         self.eps = eps
 
     def forward(self, x):
-        # Naive implementation (exp -> normalize)
         P = torch.exp(x.float())
         for _ in range(self.iters):
-            # Row normalize: sum over columns
             P = P / (P.sum(dim=2, keepdim=True) + self.eps)
-            # Col normalize: sum over rows
             P = P / (P.sum(dim=1, keepdim=True) + self.eps)
         return P
 
-def benchmark_layer(name, layer, x, iters=100):
+def benchmark_layer(layer, x, iters=100):
     # Warmup
     for _ in range(10):
-        loss = layer(x).sum(); loss.backward(); x.grad = None
-    torch.cuda.synchronize()
-    
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
-    torch.cuda.reset_peak_memory_stats()
-    mem_start = torch.cuda.memory_allocated()
-
-    start_event.record()
-    for _ in range(iters):
-        out = layer(x)
-        loss = out.sum()
+        loss = layer(x).sum()
         loss.backward()
         x.grad = None
-    end_event.record()
+        
     torch.cuda.synchronize()
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
     
-    return start_event.elapsed_time(end_event) / iters, (torch.cuda.max_memory_allocated() - mem_start) / 1024**2
+    torch.cuda.reset_peak_memory_stats()
+    mem_start = torch.cuda.memory_allocated()
+    
+    start.record()
+    for _ in range(iters):
+        out = layer(x)
+        out.sum().backward()
+        x.grad = None
+    end.record()
+    
+    torch.cuda.synchronize()
+    t_ms = start.elapsed_time(end) / iters
+    mem_mb = (torch.cuda.max_memory_allocated() - mem_start) / 1024**2
+    return t_ms, mem_mb
 
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"🚀 Benchmarking on {device}...")
-    
     configs = [{"B": 32, "L": 4}, {"B": 128, "L": 4}, {"B": 32, "L": 8}, {"B": 128, "L": 8}]
+    
     results = []
-
+    print(f"Benchmarking on {torch.cuda.get_device_name(0)}...")
+    
     for cfg in configs:
         B, L, I = cfg["B"], cfg["L"], 20
         x = torch.randn(B, L, L, device=device, requires_grad=True)
         
-        t_slow, mem_slow = benchmark_layer("Slow", SlowSinkhorn(I).to(device), x)
-        t_fast, mem_fast = benchmark_layer("Fast", FusedMHC(I).to(device), x)
+        t_slow, mem_slow = benchmark_layer(SlowSinkhorn(I).to(device), x)
+        t_fast, mem_fast = benchmark_layer(FusedMHC(I).to(device), x)
         
         results.append({
             "Batch": B, "Lanes": L,
-            "Slow (ms)": f"{t_slow:.3f}", "Fast (ms)": f"{t_fast:.3f}",
+            "Slow (ms)": f"{t_slow:.3f}",
+            "Fast (ms)": f"{t_fast:.3f}",
             "Speedup": f"{t_slow/t_fast:.1f}x" if t_fast > 0 else "N/A",
             "Mem Saved": f"{100*(1-(mem_fast/mem_slow)):.1f}%" if mem_slow > 0 else "N/A"
         })
-
+        
     print(pd.DataFrame(results).to_string(index=False))
-```
----
-
-## 📂 File Structure
-kernels.py: Contains the raw Triton kernels (_mhc_sinkhorn_fwd_kernel and _mhc_sinkhorn_bwd_kernel).
-
-layer.py: The PyTorch autograd.Function wrapper and nn.Module interface. Handles contiguous memory enforcement and type casting.
-
-benchmark.py: Script to reproduce the performance results.
-
-## License
-MIT License. Free to use in personal and commercial projects.
+    
+LicenseMIT License.
