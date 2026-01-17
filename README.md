@@ -10,11 +10,11 @@ The implementation performs the algorithm in log-space (LogSumExp-style) with `f
 
 The following benchmarks compare `FusedMHC` against a standard native PyTorch implementation. The fused kernel significantly reduces memory overhead by avoiding the materialization of intermediate tensors for every iteration of the Sinkhorn loop.
 
-Batch Size	Lanes	PyTorch (ms)	FusedMHC (ms)	Speedup	Memory Saved
-32	4	2.038	0.279	7.3x	21.7%
-128	4	1.823	0.284	6.4x	16.1%
-32	8	1.730	0.301	5.7x	11.8%
-128	8	2.193	0.282	7.8x	10.1%
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| 32 | 4 | 2.038 | 0.279 | 7.3x | 21.7% |
+| 128 | 4 | 1.823 | 0.284 | 6.4x | 16.1% |
+| 32 | 8 | 1.730 | 0.301 | 5.7x | 11.8% |
+| 128 | 8 | 2.193 | 0.282 | 7.8x | 10.1% |
 
 
 ## ✨ Key Benefits
